@@ -1,0 +1,99 @@
+# Kindle Calendar Configuration Template
+# Copy this file to config.yaml and fill in your actual values
+# config.yaml should be added to .gitignore
+
+# Kindle Device Configuration
+kindle:
+  # IP address for direct connection (used as fallback)
+  ip_address: "10.0.1.143"
+
+  # MAC address for netdiscover lookup
+  mac_address: "f0:4f:7c:ee:3e:9f"
+
+  # Network to scan for Kindle device
+  network_range: "10.0.1.0/24"
+
+  # SSH connection settings
+  ssh:
+    username: "root"
+    # Use SSH key authentication (recommended)
+    # If private_key_path is set, password is ignored
+    private_key_path: "/home/tmagari/.ssh/kindle_id_rsa"
+    # Fallback password (only used if private_key_path not available)
+    password: null  # Set to actual password if key auth not available
+    port: 22
+    timeout: 5
+
+  # SFTP target path on Kindle
+  sftp_target: "/mnt/us/panel.png"
+
+  # Display update command on Kindle
+  display_command: "/usr/sbin/eips -d l=0,w=780,h=40 & /usr/sbin/eips -f -y 40 -g /mnt/us/panel.png"
+  screensaver_command: "cp /mnt/us/panel.png /usr/share/blanket/screensaver/bg_medium_ss00.png"
+
+# Sensor Data Configuration
+sensors:
+  # Data source: 'local' for Node-RED InfluxDB, 'weather' for public weather API
+  data_source: "weather"
+
+  # Local sensor data (Node-RED server)
+  local:
+    node_red_url: "http://10.0.1.14:1880/m5echo/query"
+    database: "sensor"
+    query_interval_hours: 1
+
+  # Public weather API
+  weather:
+    api_url: "https://weather.tsukumijima.net/api/forecast"
+    city_code: "270000"  # Weather service city code
+
+  # Sensor locations and mapping
+  locations:
+    - name: "リビング"
+      hostname: "rasp-meter-1"
+    - name: "天気"
+      hostname: "rasp-meter-2"
+
+# Image and Display Configuration
+display:
+  panel:
+    width: 758
+    height: 1024
+
+  margin:
+    panel: [30, 30]
+
+  # Image file paths
+  temp_image: "/tmp/panel.png"
+  calendar_image: "/tmp/image_600x800.png"
+
+# Font Configuration
+fonts:
+  path: "/usr/share/fonts/truetype"
+  font_map:
+    SHINGO_REGULAR: "takao-gothic/TakaoPGothic.ttf"
+    SHINGO_MEDIUM: "takao-gothic/TakaoGothic.ttf"
+    SHINGO_BOLD: "takao-gothic/TakaoExGothic.ttf"
+    FUTURA_COND_BOLD: "dejavu/DejaVuSerifCondensed-Bold.ttf"
+    FUTURA_COND: "dejavu/DejaVuSerifCondensed.ttf"
+    FUTURA_MEDIUM: "dejavu/DejaVuSansMono.ttf"
+    FUTURA_BOLD: "dejavu/DejaVuSansMono.ttf"
+
+# Icon Paths
+icons:
+  calendar: "/usr/share/icons/mate/48x48/apps/kcalc.png"
+  power: "/usr/share/icons/mate/48x48/devices/uninterruptible-power-supply.png"
+  sunny: "/home/tmagari/img/sunny.png"
+  rainy: "/home/tmagari/img/rainny.png"
+
+# Logging Configuration
+logging:
+  enabled: true
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "/var/log/kindle_calendar.log"
+
+# Optional: Google Calendar Integration
+# google_calendar:
+#   enabled: false
+#   credentials_file: "/home/tmagari/.config/kindle_monitor/google_credentials.json"
+#   calendar_id: "primary"

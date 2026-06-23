@@ -1,0 +1,63 @@
+# Configuration and Secrets
+config.yaml
+config.json
+.env
+.env.local
+.env.kindle
+
+# SSH Keys
+*.pem
+*.key
+id_rsa*
+!*.pub
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+/tmp/
+*.log
+logs/
+
+# Backup files
+*.backup
+*.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+googleCalendar.py
