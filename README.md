@@ -2,6 +2,10 @@
 
 リビングのセンサーデータ、システム情報、天気予報、ストレージ使用量、カレンダーをリアルタイムで Kindle Paperwhite e-ink ディスプレイに表示するダッシュボードプロジェクトです。
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="Kindle Monitor display" width="480">
+</p>
+
 ## 対応機種
 
 - **Kindle Paperwhite Gen.5** (768×1024, 6 inch, E ink 213 ppi)
