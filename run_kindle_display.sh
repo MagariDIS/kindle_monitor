@@ -29,11 +29,6 @@ if [ -f "$HOME/.env.kindle" ]; then
     set +a
 fi
 
-# Warn if API key missing
-if [ -z "$ANTHROPIC_API_KEY" ]; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] WARNING: ANTHROPIC_API_KEY not set" >> "$LOG_FILE"
-fi
-
 # Use pyenv's python directly (absolute path - most reliable)
 PYTHON_BIN="$PYENV_ROOT/versions/3.8.13/bin/python3"
 if [ ! -x "$PYTHON_BIN" ]; then

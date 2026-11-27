@@ -84,13 +84,13 @@ else
     # Add the job
     (crontab -l 2>/dev/null || echo "# Crontab for Kindle Monitor") > /tmp/crontab.tmp
     echo "" >> /tmp/crontab.tmp
-    echo "# Kindle Monitor - Display update every 30 minutes" >> /tmp/crontab.tmp
-    echo "*/30 * * * * source ~/.env.kindle 2>/dev/null && $WRAPPER_SCRIPT" >> /tmp/crontab.tmp
+    echo "# Kindle Monitor - Display update every 15 minutes" >> /tmp/crontab.tmp
+    echo "*/15 * * * * source ~/.env.kindle 2>/dev/null && $WRAPPER_SCRIPT" >> /tmp/crontab.tmp
 
     crontab /tmp/crontab.tmp
     rm /tmp/crontab.tmp
 
-    echo "✓ Added cron job: every 30 minutes"
+    echo "✓ Added cron job: every 15 minutes"
     echo ""
     echo "Entry:"
     crontab -l 2>/dev/null | grep "run_kindle_display.sh"
@@ -115,10 +115,10 @@ echo ""
 echo "✓ Environment file: $ENV_FILE"
 echo "✓ Wrapper script: $WRAPPER_SCRIPT"
 echo "✓ Log location: $LOG_DIR/kindle_monitor.log"
-echo "✓ Cron interval: every 30 minutes (*/30 * * * *)"
+echo "✓ Cron interval: every 15 minutes (*/15 * * * *)"
 echo ""
 echo "Next runs:"
-date -d "+30 minutes" "+  %Y-%m-%d %H:%M"
+date -d "+15 minutes" "+  %Y-%m-%d %H:%M"
 date -d "+60 minutes" "+  %Y-%m-%d %H:%M"
 echo ""
 echo "Monitor logs:"

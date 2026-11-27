@@ -60,7 +60,7 @@
 ### 1. 依存関係のインストール
 
 ```bash
-pip install PyYAML Pillow requests numpy paramiko jpholiday pytz iso8601 psutil
+pip install -r requirements.txt
 ```
 
 ### 2. 設定ファイルの作成
@@ -71,10 +71,11 @@ cp config.yaml.example config.yaml
 
 **config.yaml** で以下を設定:
 
-- `kindle.ip_address`: Kindle の IP
+- `kindle.ip_address`: Kindle の IP（直接接続に使用）
 - `kindle.ssh.password` または `private_key_path`: SSH 認証
-- `sensors.wio_link`: Wio Link API トークン
+- `sensors.wio_link.sensor.node_id` / `access_token`: Wio Link ノードとトークン
 - `sensors.weather.city_code`: 気象庁地域コード（例: 270000 = 大阪）
+- `anthropic`（任意）: Claude 使用率取得。取得関数は実装済みだが、現状は画面に描画していない
 
 ### 3. セキュリティ設定
 
@@ -102,7 +103,7 @@ kindle:
 python3 kindle_display_enhanced.py
 ```
 
-### Cron 自動実行（15 分間隔）
+### Cron 自動実行（15 分間隔、`setup_cron.sh` でも登録可）
 
 `run_kindle_display.sh` は cron 環境（pyenv 等）を吸収するラッパースクリプトです。
 
@@ -127,7 +128,8 @@ crontab -e
 | `kindle_display_enhanced.py` | **本番版** メインスクリプト |
 | `config.yaml` | 設定ファイル（git 管理外） |
 | `config.yaml.example` | 設定テンプレート |
-| `.env.kindle.template` | 環境変数テンプレート |
+| `.env.kindle.template` | 環境変数テンプレート（`~/.env.kindle` にコピー、任意） |
+| `DEPLOYMENT.md` | 本番デプロイ手順 |
 | `run_kindle_display.sh` | Cron 用ラッパー |
 | `setup_cron.sh` | Cron セットアップ補助 |
 | `~/.kindle_monitor_data.json` | データ履歴（自動生成、24h ローリング） |

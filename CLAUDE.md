@@ -4,215 +4,82 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an IoT display project that renders sensor data and calendar information on a Kindle e-ink display. The script:
-- Fetches real-time sensor data (temperature, humidity, CO2) from a local Node-RED server or weather API
-- Generates a multi-panel image with power data, sensor readings, date/time, and calendar
-- Transfers the image to a Kindle device via SSH/SFTP
-- Updates the Kindle's screensaver display
+Kindle Paperwhite Gen.5 (768×1024, 213ppi) の e-ink ディスプレイに、センサー・システム情報・天気・ストレージ・カレンダーを描画するダッシュボード。
+
+- 本番スクリプト: `kindle_display_enhanced.py`（唯一の本番版）
+- cron ラッパー: `run_kindle_display.sh`（pyenv 絶対パス python を使用、`~/.env.kindle` を読み込み）
+- `kindle_display_*.py`（enhanced 以外）、`kindle_calendar.py` は過去バージョン。**変更・参照の対象にしない**
 
 ## Architecture
 
-### Main Flow
-1. **Data Collection Layer**: `get_sensor_data_map()` and `get_power_data_map()` fetch sensor values from remote HTTP endpoints (either local InfluxDB via Node-RED or public weather API)
-2. **Image Generation Layer**: Multiple panel classes compose and render data onto a PIL Image
-   - `SenseLargeHeaderPanel`: Power/weather metrics (top section)
-   - `SenseLargeFooterPanel`: Date and weekday (bottom section)
-   - `SenseDetailPanel`: Detailed sensor readings (temperature, humidity, CO2 for multiple locations)
-   - `UpdateTimePanel`: Last update timestamp
-   - `drawCalendarClass`: Month calendar with holidays and events
-3. **Device Communication Layer**: SSH connection to Kindle device to transfer image and execute display commands
-
-### Key Classes
-
-- **Panel Classes** (`SenseLargeHeaderPanel`, `SenseLargeFooterPanel`, `SenseDetailPanel`, `UpdateTimePanel`):
-  - Each has `offset_map()` to calculate positions for text/icons
-  - `draw()` method renders content and returns the next Y position for layout
-  - Use numpy arrays for coordinate calculations
-  - Use PIL for image drawing and fonts
-
-- **drawCalendarClass**: 
-  - Renders a full month calendar view
-  - Highlights Japanese holidays (via jpholiday)
-  - Shows upcoming events (currently hard-coded)
-
-### Data Flow
-
 ```
-Sensor APIs
-   ↓
-get_sensor_data_map() / get_power_data_map()
-   ↓
-Panel Classes (draw to PIL Image)
-   ↓
-SSH/SFTP to Kindle
-   ↓
-eips command to update e-ink display
+get_wio_link_data / get_weather_data / get_cpu_* / get_gpu_* /
+get_memory_usage / get_storage_usage
+        ↓
+DATA_HISTORY (deque 144点 = 24h, ~/.kindle_monitor_data.json に永続化)
+        ↓
+create_image()  … PIL で 768×1024 グレースケール描画
+        ↓
+upload_to_kindle()  … /tmp/panel.png → SFTP(paramiko) → eips で表示
 ```
+
+### レイアウト（`create_image()`）
+- 左ナビ（幅 32%）: 時刻(72pt)・日付・曜日、CPU%/CPU°C/GPU%/Mem%、今日/明日の天気と説明文
+- メイン: Environment カード（Temp/Humi/Rain）、Storage カード（Home FS と `/dev/sda3` のドーナツ）、
+  CPU% トレンド、CPU/GPU 温度トレンド（各 24h）、月間カレンダー（jpholiday で祝日）
+- グレースケール: 0=数値/本文, 80–120=ラベル/補助線, 210–245=背景/カード
+- セーフエリアは高さの 90%
+
+### 主な関数
+- `load_config()` … `config.yaml` を読み込み（無ければ終了）
+- `get_claude_usage()` / `get_claude_oauth_token()` … 実装済みだが **現状 `create_image()` から呼ばれていない**（画面に出ない）
+- `draw_donut` / `draw_grid_25` / `draw_area_graph` / `wrap_japanese_text` … 描画ヘルパー
 
 ## Dependencies
 
-- **Core**: Python 3
-- **Image Processing**: PIL (Pillow)
-- **Data**: requests, numpy
-- **SSH/SFTP**: paramiko
-- **Date/Time**: datetime, iso8601, pytz, jpholiday (Japanese holidays)
-- **Optional**: googleCalendar module (imported but commented out in usage)
+`pip install -r requirements.txt`（PyYAML, Pillow, requests, numpy, paramiko, jpholiday, pytz, iso8601, psutil）。
+GPU は `nvidia-smi`、ストレージ検出は `findmnt` を使用。
 
 ## Configuration
 
-### Key Paths (hardcoded - requires environment-specific updates)
-- Icons: `/usr/share/icons/mate/48x48/` (calendar, power icons)
-- Weather icons: `/home/tmagari/img/` (sunny.png, rainny.png)
-- Fonts: `/usr/share/fonts/truetype/` (TakaoGothic, DejaVu)
-- Temp panel: `/tmp/panel.png`
+- `config.yaml`（git 管理外。テンプレートは `config.yaml.example`）
+  - `kindle.ip_address` / `kindle.ssh.{username,password,private_key_path,port,timeout}` / `sftp_target` / `display_command`
+  - `sensors.wio_link.{base_url,sensor.{node_id,access_token,temp_key,humi_key}}`
+  - `sensors.weather.city_code`（tsukumijima.net, 270000=大阪）
+  - `fonts`（Noto Sans CJK + DejaVu）、`anthropic`（任意）
+- `~/.env.kindle`（任意、`.env.kindle.template` 参照）: `ANTHROPIC_API_KEY`（フォールバック）、`LOG_FILE`
+- 注意: `upload_to_kindle()` は現状 `ssh.password` のみ使用（`private_key_path` は未対応）。`kindle.ip_address` へ直接接続（netdiscover は使わない）
 
-### Sensor Configuration
-- `PLACE_LIST`: Locations to monitor (currently: `['リビング', '天気']`)
-- `HOST_MAP`: Maps locations to hostnames (`'リビング': 'rasp-meter-1'`, `'天気': 'rasp-meter-2'`)
-- Node-RED API: `http://10.0.1.14:1880/m5echo/query`
-- Weather API: `https://weather.tsukumijima.net/api/forecast?city=270000`
-
-### Kindle Configuration
-- Discovery: Uses `netdiscover` to find Kindle by MAC (`f0:4f:7c:ee:3e:9f`)
-- Fallback IP: `10.0.1.143`
-- SSH credentials: `root`/`mario` (hardcoded - security risk)
-- SFTP target: `/mnt/us/panel.png`
-- Display command: `eips` utility on Kindle
-
-## Running the Script
+## Running
 
 ```bash
-# Install dependencies
-pip install PyYAML Pillow requests numpy paramiko jpholiday pytz iso8601
-
-# Copy and configure
-cp config.yaml.example config.yaml
-# Edit config.yaml with your environment values
-
-# Run the main script
-python3 kindle_calendar.py
-
-# Or run via cron (typically every 30 minutes)
-# */30 * * * * cd /path/to/kindle_monitor && python3 kindle_calendar.py
+python3 kindle_display_enhanced.py      # 手動実行
+bash run_kindle_display.sh              # cron と同じ環境で実行
+bash setup_cron.sh                      # cron 登録（15分間隔）
 ```
 
-## セキュリティ設定
-
-### 1. sudo パスワード不要化（netdiscoverコマンド用）
-
-cronジョブから実行する場合、sudoers を設定してパスワード入力を不要にします：
-
-```bash
-# sudoers ファイルを編集
-sudo visudo
-
-# 以下の行を追加（NOPASSWD により netdiscover がパスワード不要に）
-username ALL=(ALL) NOPASSWD: /usr/bin/netdiscover
-
-# 保存・終了して完了
+cron（15分間隔）:
+```cron
+*/15 * * * * cd /path/to/kindle_monitor/ && bash /path/to/kindle_monitor/run_kindle_display.sh >> /path/to/kindle_monitor/logs/run.log 2>&1
 ```
 
-### 2. SSH 鍵認証の設定（推奨）
+ログ: `logs/kindle_monitor.log`（ラッパー経由）、`logs/run.log`（cron 出力）。
 
-Kindle への SSH 接続をパスワードから鍵認証に変更します：
+## セキュリティ
 
-**Step 1: Kindle 用の SSH 鍵ペアを生成**
-```bash
-ssh-keygen -t rsa -b 4096 -f ~/.ssh/kindle_id_rsa -N ""
-# -N "" でパスフレーズなし（cron から自動実行するため）
-```
+- `config.yaml` / `.env.kindle` / 鍵ファイルは `.gitignore` 済み。**秘密情報をコード・ドキュメント・コミットに含めない**
+- Kindle の SSH は鍵認証が推奨:
+  ```bash
+  ssh-keygen -t rsa -b 4096 -f ~/.ssh/kindle_id_rsa -N ""
+  ssh-copy-id -i ~/.ssh/kindle_id_rsa.pub root@<kindle-ip>
+  ```
+  `config.yaml` の `kindle.ssh.private_key_path` に指定（※ 上記のとおりコード側の対応が必要）
+- `~/.env.kindle` は `chmod 600`
 
-**Step 2: 公開鍵を Kindle に転送**
-```bash
-# 初回のみパスワード認証で Kindle に接続
-ssh-copy-id -i ~/.ssh/kindle_id_rsa.pub -p 22 root@10.0.1.143
-# または手動で ~/.ssh/kindle_id_rsa.pub の内容を Kindle の ~/.ssh/authorized_keys に追加
-```
+## Known Issues
 
-**Step 3: config.yaml で秘密鍵パスを指定**
-```yaml
-kindle:
-  ssh:
-    private_key_path: "/home/tmagari/.ssh/kindle_id_rsa"
-    password: null  # パスワード認証は不要
-```
-
-**Step 4: パスワード認証を無効化（Kindle 側・オプション）**
-```bash
-ssh root@10.0.1.143
-# Kindle 上で以下を編集
-vi /etc/ssh/sshd_config
-# PasswordAuthentication no に変更
-# sshd 再起動: /etc/init.d/sshd restart
-```
-
-### 3. Kindle での sudo/SSH 設定（初期セットアップ）
-
-Kindle 上で SSH パスワード認証を許可する場合：
-```bash
-ssh root@10.0.1.143  # 初回はパスワード認証
-# Kindle 上で実行：
-mkdir -p ~/.ssh
-chmod 700 ~/.ssh
-# 公開鍵を ~/.ssh/authorized_keys に追加
-```
-
-### 4. ログ管理
-
-設定ファイルで logging を有効化すると、実行結果がファイルに記録されます：
-
-```yaml
-logging:
-  enabled: true
-  level: "INFO"
-  file: "/var/log/kindle_calendar.log"
-```
-
-cronジョブでログを出力する場合の設定例：
-```bash
-*/30 * * * * cd /path/to/kindle_monitor && python3 kindle_calendar.py >> /var/log/kindle_calendar.log 2>&1
-```
-
-## Important Notes
-
-### Hardcoded Values
-- Kindle SSH password is hardcoded as `'mario'` (line 780) — **security concern for production**
-- Image paths, font paths, and API endpoints are absolute paths/URLs specific to the developer's environment
-- Panel dimensions (758×1024) are tuned for specific Kindle model
-
-### Data Fetching Logic
-- If `wionode_use` global exists: fetches from local InfluxDB via Node-RED
-- Otherwise: falls back to public weather API (only returns limited weather data)
-- Sensor data includes: temperature, humidity, CO2, min/max power values, last update time
-
-### Panel Layout System
-- Coordinates are calculated using numpy arrays for composition
-- `offset_map()` methods generate absolute positions for all text elements
-- `draw()` methods use PIL's `ImageDraw` and return the Y position of drawn content
-- Next panel offset is based on previous panel's return value
-
-### Font System
-- `FONT_MAP`: Maps symbolic names to truetype file paths
-- `FACE_MAP`: Maps face names to font type and size
-- `get_font()` helper loads fonts on demand
-
-### Display Updates
-- Generates `/tmp/panel.png` image
-- Also generates calendar view to same file (overwrites)
-- Transfers to Kindle via SFTP
-- Executes `eips` command to render (both main display and screensaver)
-
-## Environment Considerations
-
-- **Linux-only**: Uses system font paths, `netdiscover` command, and SSH
-- **Network**: Requires connectivity to Kindle device and sensor APIs
-- **Permissions**: May require sudo for `netdiscover` network scanning
-- **Timezone**: Uses `pytz` for timezone handling; ensure system timezone is configured
-
-## Potential Issues
-
-1. **Hardcoded paths**: Will fail if fonts or icons not at expected locations
-2. **Network dependency**: Requires reachable Kindle and sensor servers
-3. **Credential exposure**: SSH password is plain text in code
-4. **Image overwrite**: Calendar and sensor images both write to `/tmp/panel.png` (only one is visible)
-5. **Commented code**: Tapo camera integration and `SenseDetailPanel` are commented out; may be incomplete
+1. フォント・アイコン・API エンドポイントは環境依存（Noto CJK が必要）
+2. Claude 使用率は取得のみで未描画
+3. `upload_to_kindle()` は鍵認証未対応、`AutoAddPolicy` でホスト鍵を無検証受け入れ
+4. ストレージ対象 `/dev/sda3` は `get_storage_usage()` にハードコード
+5. ルート直下の `CRON_SETUP.md`, `START_HERE.md`, `README_FINAL.md`, `DESIGN*.md`, `IMPLEMENTATION_COMPLETE.md`, `CRON_UPDATE_FINAL.md`, `SETUP_CRON_QUICK.md` は過去バージョン時点の未追跡ドキュメントで、現行実装とは一致しない（正は `README.md` / `DEPLOYMENT.md`）
