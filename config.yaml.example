@@ -63,12 +63,11 @@ fonts:
     FUTURA_MEDIUM: "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
     FUTURA_BOLD: "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
 
-# Claude 使用率取得（任意）。現状 create_image() では描画されていません。
-# 認証は ~/.claude/.credentials.json の OAuth トークンを優先し、
-# 無ければ api_key / 環境変数 ANTHROPIC_API_KEY を使用します。
+# Claude カード / Claude Code Sessions カードの表示（任意）
+# 認証は ~/.claude/.credentials.json の OAuth トークンを使用（リフレッシュはしない）。
+# 取得できない場合もキャッシュ値とローカルログ集計で表示を継続します。
 anthropic:
   enabled: false
-  api_key: null
 
 logging:
   enabled: true

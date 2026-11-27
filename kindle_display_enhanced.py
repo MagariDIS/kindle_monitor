@@ -25,6 +25,7 @@ from PIL import Image, ImageDraw, ImageFont
 import calendar
 import yaml
 from collections import deque
+import kindle_ai_status
 
 def load_config(config_file='config.yaml'):
     config_path = Path(config_file)
@@ -202,31 +203,6 @@ def get_memory_usage():
     except:
         return '--'
 
-CLAUDE_CREDENTIALS_PATH = Path.home() / '.claude' / '.credentials.json'
-
-def get_claude_oauth_token():
-    """Claude Code の OAuth トークン (user:profile スコープ付き) を読み込む。
-    期限切れの場合は None を返す。
-    """
-    try:
-        if not CLAUDE_CREDENTIALS_PATH.exists():
-            return None, 'no_credentials'
-        with open(CLAUDE_CREDENTIALS_PATH, 'r') as f:
-            creds = json.load(f)
-        oauth = creds.get('claudeAiOauth', {})
-        access_token = oauth.get('accessToken')
-        expires_at_ms = oauth.get('expiresAt', 0)
-        if not access_token:
-            return None, 'no_token'
-        # expiresAt はミリ秒
-        now_ms = int(datetime.datetime.now().timestamp() * 1000)
-        if expires_at_ms and now_ms >= expires_at_ms:
-            return None, 'expired'
-        return access_token, 'ok'
-    except Exception as e:
-        logging.warning("OAuth credentials read error: " + str(e))
-        return None, 'read_error'
-
 def get_storage_usage():
     """ストレージ使用率を取得。HOME のあるFSと /dev/sda3 を対象。"""
     result = {
@@ -260,68 +236,6 @@ def get_storage_usage():
     except Exception as e:
         logging.warning("Storage usage error: " + str(e))
     return result
-
-def get_claude_usage():
-    try:
-        anthropic_cfg = CONFIG.get('anthropic', {})
-        if not anthropic_cfg.get('enabled', False):
-            return {'five_hour': '--', 'seven_day': '--', 'status': 'off'}
-
-        # 優先: Claude Code OAuth credentials (user:profile スコープ持ち)
-        token, token_status = get_claude_oauth_token()
-        if token:
-            headers = {
-                'Authorization': 'Bearer ' + token,
-                'anthropic-version': '2023-06-01',
-                'anthropic-beta': 'oauth-2025-04-20',
-                'Accept': 'application/json',
-            }
-        else:
-            # フォールバック: 環境変数の API キー (スコープ不足の可能性あり)
-            api_key = anthropic_cfg.get('api_key') or os.environ.get('ANTHROPIC_API_KEY')
-            if not api_key or api_key.startswith('sk-ant-...'):
-                logging.warning("Claude usage: no credentials (oauth=" + token_status + ", env=missing)")
-                return {'five_hour': '--', 'seven_day': '--', 'status': 'off'}
-            if api_key.startswith('sk-ant-oat'):
-                headers = {
-                    'Authorization': 'Bearer ' + api_key,
-                    'anthropic-version': '2023-06-01',
-                    'anthropic-beta': 'oauth-2025-04-20',
-                    'Accept': 'application/json',
-                }
-            else:
-                headers = {
-                    'x-api-key': api_key,
-                    'anthropic-version': '2023-06-01',
-                    'anthropic-beta': 'oauth-2025-04-20',
-                    'Accept': 'application/json',
-                }
-
-        resp = requests.get('https://api.anthropic.com/api/oauth/usage', headers=headers, timeout=10)
-        logging.info("Claude usage API: HTTP " + str(resp.status_code))
-
-        if resp.status_code == 200:
-            data = resp.json()
-            fh = data.get('five_hour', {})
-            sd = data.get('seven_day', {})
-            return {
-                'five_hour': str(int(fh.get('utilization', 0))) + '%',
-                'seven_day': str(int(sd.get('utilization', 0))) + '%',
-                'status': 'ok'
-            }
-        elif resp.status_code == 429:
-            return {'five_hour': '--', 'seven_day': '--', 'status': '429'}
-        elif resp.status_code == 401:
-            return {'five_hour': '--', 'seven_day': '--', 'status': '401'}
-        elif resp.status_code == 403:
-            logging.warning("Claude usage 403: " + resp.text[:200])
-            return {'five_hour': '--', 'seven_day': '--', 'status': '403'}
-        else:
-            logging.warning("Claude usage error " + str(resp.status_code) + ": " + resp.text[:200])
-            return {'five_hour': '--', 'seven_day': '--', 'status': 'error'}
-    except Exception as e:
-        logging.warning("Claude usage exception: " + str(e))
-        return {'five_hour': '--', 'seven_day': '--', 'status': 'error'}
 
 def record_data_point(cpu_pct, gpu_pct, cpu_temp, gpu_temp):
     DATA_HISTORY['cpu_pct'].append(int(cpu_pct.rstrip('%') or '0'))
@@ -420,6 +334,104 @@ def wrap_japanese_text(text, max_chars_per_line, max_lines=None):
     return lines
 
 # Create image
+def draw_compact_calendar(draw, now, x, y, w, h, font_day, font_num, font_path_mono, pad):
+    """今週(月曜始まり)と来週の2行カレンダー。祝日・今日・土日の表現は従来どおり。"""
+    draw.rectangle([x, y, x + w, y + h], outline=100, width=1, fill=245)
+    font_title = ImageFont.truetype(font_path_mono + 'DejaVuSansMono-Bold.ttf', 22)
+    draw.text((x + pad, y + 6), now.strftime('%Y-%m'), fill=0, font=font_title)
+
+    today = now.date()
+    start = today - datetime.timedelta(days=today.weekday())
+    col_w = (w - 8) // 7
+    labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    head_y = y + 42
+    for i, name in enumerate(labels):
+        draw.text((x + 4 + i * col_w + col_w // 2, head_y), name,
+                  fill=120 if i >= 5 else 80, font=font_day, anchor='mm')
+    draw.line([(x + 8, head_y + 12), (x + w - 8, head_y + 12)], fill=150, width=1)
+
+    row_y = head_y + 34
+    for r in range(2):
+        for i in range(7):
+            d = start + datetime.timedelta(days=r * 7 + i)
+            is_today = d == today
+            is_holiday = jpholiday.is_holiday(d)
+            cx1, cx2 = x + 4 + i * col_w + 2, x + 4 + i * col_w + col_w - 2
+            if is_holiday and not is_today:
+                draw.rectangle([cx1, row_y - 16, cx2, row_y + 14], outline=80, width=1, fill=210)
+            if is_today:
+                draw.rectangle([cx1, row_y - 16, cx2, row_y + 14], outline=0, width=2, fill=140)
+            color = 120 if (i >= 5 and not is_today and not is_holiday) else 0
+            # 月が替わる日は M/D 表記にして月境界を分かりやすくする
+            text = (str(d.month) + '/' + str(d.day)) if (d.day == 1 and not is_today) else str(d.day)
+            draw.text((x + 4 + i * col_w + col_w // 2, row_y), text,
+                      fill=color, font=font_num, anchor='mm')
+        row_y += 34
+
+
+def draw_claude_card(draw, x, y, w, h, quota, local_tok, font_label, font_value, font_small, pad):
+    """Claude クォータ: 5h/7d バー。API 不可時は状態表示 + ローカル集計。"""
+    draw.rectangle([x, y, x + w, y + h], outline=100, width=1, fill=235)
+    draw.text((x + pad, y + 8), 'Claude', fill=80, font=font_label)
+
+    state = quota.get('state', 'off')
+    tag = {
+        'live': 'live',
+        'cached': 'cached ' + str(quota.get('age_min', 0)) + 'm ago',
+        'auth': 'token expired',
+        'limited': 'rate limited',
+        'error': 'unavailable',
+        'off': 'disabled',
+    }.get(state, state)
+    if state in ('auth', 'limited', 'error') and quota.get('five_hour') is not None:
+        tag += ' (' + str(quota.get('age_min', 0)) + 'm ago)'
+    draw.text((x + w - pad, y + 10), tag, fill=100, font=font_small, anchor='ra')
+
+    bar_x = x + pad + 40
+    bar_w = w - pad * 2 - 40 - 150
+    row_y = y + 40
+    for label, key, reset in [('5h', 'five_hour', quota.get('five_reset', '')),
+                              ('7d', 'seven_day', quota.get('seven_reset', ''))]:
+        pct = quota.get(key)
+        draw.text((x + pad, row_y), label, fill=80, font=font_label, anchor='lm')
+        draw.rectangle([bar_x, row_y - 9, bar_x + bar_w, row_y + 9], outline=100, width=1, fill=215)
+        if pct is not None:
+            fw = int(bar_w * max(0, min(100, pct)) / 100)
+            if fw > 0:
+                draw.rectangle([bar_x, row_y - 9, bar_x + fw, row_y + 9],
+                               fill=60 if pct >= 90 else (90 if pct >= 75 else 130))
+            draw.text((bar_x + bar_w + 10, row_y), str(pct) + '%', fill=0, font=font_value, anchor='lm')
+            if reset:
+                draw.text((x + w - pad, row_y), '>' + reset, fill=100, font=font_small, anchor='rm')
+        else:
+            draw.text((bar_x + bar_w + 10, row_y), '--', fill=120, font=font_value, anchor='lm')
+        row_y += 38
+
+    # ローカル集計（API 不要・常に出す）
+    draw.text((x + pad, y + h - 18),
+              'Local 5h: ' + kindle_ai_status.fmt_tokens(local_tok) + ' tok (est.)',
+              fill=100, font=font_small, anchor='lm')
+
+
+def draw_sessions_card(draw, x, y, w, h, sessions, font_label, font_small, pad):
+    """Claude Code セッション一覧（メタ情報のみ）。"""
+    draw.rectangle([x, y, x + w, y + h], outline=100, width=1, fill=245)
+    draw.text((x + pad, y + 8), 'Claude Code Sessions', fill=80, font=font_label)
+    if not sessions:
+        draw.text((x + pad, y + 40), 'no recent sessions', fill=120, font=font_small)
+        return
+    font_row = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf', 13)
+    row_y = y + 40
+    max_rows = max(1, (h - 44) // 24)
+    for s in sessions[:max_rows]:
+        mark = {'active': '●', 'idle': '○'}.get(s['status'], '·')
+        age = (str(s['age_min']) + 'm') if s['age_min'] < 60 else (str(s['age_min'] // 60) + 'h')
+        line = (mark + ' ' + s['project'][:16].ljust(16) + ' ' + s['model'][:12].ljust(12)
+                + ' ctx ' + kindle_ai_status.fmt_tokens(s['ctx']).rjust(5) + ' ' + age.rjust(4))
+        draw.text((x + pad, row_y), line, fill=0 if s['status'] == 'active' else 90, font=font_row)
+        row_y += 24
+
+
 def create_image():
     width = 768
     height = 1024
@@ -456,6 +468,11 @@ def create_image():
     now = datetime.datetime.now()
 
     record_data_point(cpu_pct, gpu_pct, cpu_temp, gpu_temp)
+
+    anthropic_cfg = CONFIG.get('anthropic', {}) or {}
+    quota = kindle_ai_status.get_claude_quota(anthropic_cfg.get('enabled', False))
+    local_tok = kindle_ai_status.get_local_tokens_5h() if anthropic_cfg.get('enabled', False) else None
+    ai_sessions = kindle_ai_status.get_ai_sessions(4) if anthropic_cfg.get('enabled', False) else []
 
     left_nav_x = 4
     left_nav_w = 246
@@ -668,72 +685,38 @@ def create_image():
     # トレンドグラフセクション全体の高さ更新
     main_y_addition = temp_graph_h
 
-    # カレンダー
+    # 下段: 縮小カレンダー + Claude クォータ + AI セッション
+    # 各カードは独立して try/except（1つ壊れても画像全体は出す）
+    area_x = main_x + 4
+    area_w = main_w - 8
+    area_bottom = safe_height - 4
     main_y += temp_graph_h + 8
-    cal_h = safe_height - main_y - 4
-    cal_x = main_x + 4
-    cal_w = main_w - 8
 
-    draw.rectangle([cal_x, main_y, cal_x + cal_w, main_y + cal_h],
-                   outline=100, width=1, fill=245)
+    cal_h = 140
+    quota_h = 150
+    gap = 8
 
-    # 年-月ラベル拡大
-    font_cal_title = ImageFont.truetype(font_path_mono + 'DejaVuSansMono-Bold.ttf', 28)
-    draw.text((cal_x + card_pad, main_y + 8), now.strftime('%Y-%m'), fill=0, font=font_cal_title)
+    try:
+        draw_compact_calendar(draw, now, area_x, main_y, area_w, cal_h,
+                              font_cal_day, font_cal_num, font_path_mono, card_pad)
+    except Exception as e:
+        logging.warning("Calendar draw error: " + str(e))
+    main_y += cal_h + gap
 
-    cal = calendar.monthcalendar(now.year, now.month)
-    cal_y = main_y + 56
-    col_width = (cal_w - 8) // 7
-    row_height = 36  # 行間を広く
+    try:
+        draw_claude_card(draw, area_x, main_y, area_w, quota_h, quota, local_tok,
+                         font_label_en, font_value_small, font_small, card_pad)
+    except Exception as e:
+        logging.warning("Claude card draw error: " + str(e))
+    main_y += quota_h + gap
 
-    # 曜日ヘッダー（土＝Sat 灰、日＝Sun 灰）
-    weekday_labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-    for i, day_name in enumerate(weekday_labels):
-        # 土曜=index 5, 日曜=index 6
-        wd_color = 120 if i >= 5 else 80
-        draw.text((cal_x + 4 + i * col_width + col_width // 2, cal_y),
-                 day_name, fill=wd_color, font=font_cal_day, anchor='mm')
-
-    # ヘッダー下に区切り線
-    cal_y += 18
-    draw.line([(cal_x + 8, cal_y), (cal_x + cal_w - 8, cal_y)], fill=150, width=1)
-
-    cal_y += row_height // 2 + 4
-    for week in cal:
-        for day_idx, day_num in enumerate(week):
-            if day_num > 0:
-                is_today = day_num == now.day
-                is_holiday = jpholiday.is_holiday(datetime.date(now.year, now.month, day_num))
-                is_weekend = day_idx >= 5  # 土日
-
-                cell_x1 = cal_x + 4 + day_idx * col_width + 2
-                cell_x2 = cal_x + 4 + day_idx * col_width + col_width - 2
-                cell_y1 = cal_y - 16
-                cell_y2 = cal_y + 14
-
-                # 祝日: 背景塗りつぶし + 枠取り
-                if is_holiday and not is_today:
-                    draw.rectangle([cell_x1, cell_y1, cell_x2, cell_y2],
-                                  outline=80, width=1, fill=210)
-
-                # 今日: 濃い枠取り
-                if is_today:
-                    draw.rectangle([cell_x1, cell_y1, cell_x2, cell_y2],
-                                  outline=0, width=2, fill=140)
-
-                # 文字色: 今日=黒、祝日=黒（背景で識別）、土日=灰、平日=黒
-                if is_today:
-                    text_color = 0
-                elif is_holiday:
-                    text_color = 0
-                elif is_weekend:
-                    text_color = 120
-                else:
-                    text_color = 0
-
-                draw.text((cal_x + 4 + day_idx * col_width + col_width // 2, cal_y),
-                         str(day_num), fill=text_color, font=font_cal_num, anchor='mm')
-        cal_y += row_height
+    sess_h = area_bottom - main_y
+    if sess_h >= 60:
+        try:
+            draw_sessions_card(draw, area_x, main_y, area_w, sess_h, ai_sessions,
+                               font_label_en, font_small, card_pad)
+        except Exception as e:
+            logging.warning("Sessions card draw error: " + str(e))
 
     return img
 

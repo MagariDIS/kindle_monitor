@@ -31,11 +31,9 @@
   - 空き容量 GB も併記
 - **CPU% トレンドグラフ**（24h、25% 刻みグリッド）
 - **CPU/GPU 温度トレンドグラフ**（左右 2 分割、25% 刻みグリッド）
-- **月間カレンダー**:
-  - 28pt 太字の年-月ラベル
-  - 土日の灰色表示
-  - 祝日の背景塗り＋枠取り（jpholiday 対応）
-  - 今日のハイライト枠
+- **縮小カレンダー**（今週＋来週の2行）: 土日の灰色表示、祝日の背景塗り＋枠取り（jpholiday）、今日のハイライト枠
+- **Claude カード**: 5h / 7d 使用率バーとリセット時刻。取得できない場合は状態（`token expired` / `rate limited` など）と最終成功値の経過時間を表示し、ローカルログから集計した直近5hのトークン量（概算）を常に併記
+- **Claude Code Sessions カード**: 直近セッション（プロジェクト・モデル・文脈量・経過時間、`●`稼働中 / `○`待機中）。会話本文は読まない
 
 ## アーキテクチャ
 
@@ -75,7 +73,7 @@ cp config.yaml.example config.yaml
 - `kindle.ssh.password` または `private_key_path`: SSH 認証
 - `sensors.wio_link.sensor.node_id` / `access_token`: Wio Link ノードとトークン
 - `sensors.weather.city_code`: 気象庁地域コード（例: 270000 = 大阪）
-- `anthropic`（任意）: Claude 使用率取得。取得関数は実装済みだが、現状は画面に描画していない
+- `anthropic.enabled`（任意）: `true` で Claude カードと Sessions カードを表示。認証は `~/.claude/.credentials.json` の OAuth トークンを使用（リフレッシュはしない）
 
 ### 3. セキュリティ設定
 
@@ -126,6 +124,7 @@ crontab -e
 | ファイル | 用途 |
 |---------|------|
 | `kindle_display_enhanced.py` | **本番版** メインスクリプト |
+| `kindle_ai_status.py` | Claude クォータ / Claude Code セッションの取得（キャッシュ・バックオフ付き） |
 | `config.yaml` | 設定ファイル（git 管理外） |
 | `config.yaml.example` | 設定テンプレート |
 | `.env.kindle.template` | 環境変数テンプレート（`~/.env.kindle` にコピー、任意） |
@@ -133,6 +132,7 @@ crontab -e
 | `run_kindle_display.sh` | Cron 用ラッパー |
 | `setup_cron.sh` | Cron セットアップ補助 |
 | `~/.kindle_monitor_data.json` | データ履歴（自動生成、24h ローリング） |
+| `~/.kindle_monitor_claude_cache.json` | Claude クォータの最終成功値とバックオフ状態（自動生成） |
 
 ## レイアウト仕様
 
@@ -145,6 +145,10 @@ crontab -e
   - 210-245 (淡灰): 背景、カード塗り
 
 ## トラブルシューティング
+
+### Claude カードが `token expired` / `rate limited` のまま
+
+使用率 API は非公式で、トークン失効や 429 が起こりえます。本プロジェクトはトークンを更新せず、最終成功値（`cached Nm ago`）とローカル集計の表示で継続します。`token expired` は `~/.claude/.credentials.json` が更新されていない状態です（Claude Code でログインし直すと復帰する場合があります）。
 
 ### Cron 実行は走るがエラー終了する
 

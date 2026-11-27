@@ -26,13 +26,18 @@ upload_to_kindle()  … /tmp/panel.png → SFTP(paramiko) → eips で表示
 ### レイアウト（`create_image()`）
 - 左ナビ（幅 32%）: 時刻(72pt)・日付・曜日、CPU%/CPU°C/GPU%/Mem%、今日/明日の天気と説明文
 - メイン: Environment カード（Temp/Humi/Rain）、Storage カード（Home FS と `/dev/sda3` のドーナツ）、
-  CPU% トレンド、CPU/GPU 温度トレンド（各 24h）、月間カレンダー（jpholiday で祝日）
+  CPU% トレンド、CPU/GPU 温度トレンド（各 24h）、縮小カレンダー（今週+来週、jpholiday で祝日）、
+  Claude カード（5h/7d）、Claude Code Sessions カード
 - グレースケール: 0=数値/本文, 80–120=ラベル/補助線, 210–245=背景/カード
 - セーフエリアは高さの 90%
 
 ### 主な関数
 - `load_config()` … `config.yaml` を読み込み（無ければ終了）
-- `get_claude_usage()` / `get_claude_oauth_token()` … 実装済みだが **現状 `create_image()` から呼ばれていない**（画面に出ない）
+- `kindle_ai_status.py`（AI 状況の取得。**安定性優先**）
+  - `get_claude_quota()` … 使用率 API は最善努力。キャッシュ(`~/.kindle_monitor_claude_cache.json`)・429 は Retry-After 尊重のバックオフ・トークン失効時は呼ばない。**トークンのリフレッシュはしない**（Claude Code のログインを壊さないため）
+  - `get_local_tokens_5h()` / `get_ai_sessions()` … `~/.claude/projects/*/*.jsonl` の末尾のみ走査（件数・サイズ上限あり、会話本文は読まない）
+  - 全関数は例外を投げず state を返す。`create_image()` 側もカードごとに try/except
+- `draw_compact_calendar` / `draw_claude_card` / `draw_sessions_card` … 下段3カードの描画
 - `draw_donut` / `draw_grid_25` / `draw_area_graph` / `wrap_japanese_text` … 描画ヘルパー
 
 ## Dependencies
@@ -46,8 +51,8 @@ GPU は `nvidia-smi`、ストレージ検出は `findmnt` を使用。
   - `kindle.ip_address` / `kindle.ssh.{username,password,private_key_path,port,timeout}` / `sftp_target` / `display_command`
   - `sensors.wio_link.{base_url,sensor.{node_id,access_token,temp_key,humi_key}}`
   - `sensors.weather.city_code`（tsukumijima.net, 270000=大阪）
-  - `fonts`（Noto Sans CJK + DejaVu）、`anthropic`（任意）
-- `~/.env.kindle`（任意、`.env.kindle.template` 参照）: `ANTHROPIC_API_KEY`（フォールバック）、`LOG_FILE`
+  - `fonts`（Noto Sans CJK + DejaVu）、`anthropic.enabled`（Claude/Sessions カードの ON/OFF）
+- `~/.env.kindle`（任意、`.env.kindle.template` 参照）: `LOG_FILE`（Claude 認証は `~/.claude/.credentials.json` のみ使用。`ANTHROPIC_API_KEY` は不要）
 - 注意: `upload_to_kindle()` は現状 `ssh.password` のみ使用（`private_key_path` は未対応）。`kindle.ip_address` へ直接接続（netdiscover は使わない）
 
 ## Running
@@ -79,7 +84,7 @@ cron（15分間隔）:
 ## Known Issues
 
 1. フォント・アイコン・API エンドポイントは環境依存（Noto CJK が必要）
-2. Claude 使用率は取得のみで未描画
+2. Claude 使用率 API は非公式で不安定（失効・429）。失敗時はキャッシュ値 + ローカル集計で表示継続する設計
 3. `upload_to_kindle()` は鍵認証未対応、`AutoAddPolicy` でホスト鍵を無検証受け入れ
 4. ストレージ対象 `/dev/sda3` は `get_storage_usage()` にハードコード
 5. 過去バージョン時点のドキュメント（`CRON_SETUP.md`, `START_HERE.md`, `README_FINAL.md`, `DESIGN*.md` など）は `docs/archive/` に退避済みで、現行実装とは一致しない（正は `README.md` / `DEPLOYMENT.md`）
