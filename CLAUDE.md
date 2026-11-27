@@ -82,4 +82,4 @@ cron（15分間隔）:
 2. Claude 使用率は取得のみで未描画
 3. `upload_to_kindle()` は鍵認証未対応、`AutoAddPolicy` でホスト鍵を無検証受け入れ
 4. ストレージ対象 `/dev/sda3` は `get_storage_usage()` にハードコード
-5. ルート直下の `CRON_SETUP.md`, `START_HERE.md`, `README_FINAL.md`, `DESIGN*.md`, `IMPLEMENTATION_COMPLETE.md`, `CRON_UPDATE_FINAL.md`, `SETUP_CRON_QUICK.md` は過去バージョン時点の未追跡ドキュメントで、現行実装とは一致しない（正は `README.md` / `DEPLOYMENT.md`）
+5. 過去バージョン時点のドキュメント（`CRON_SETUP.md`, `START_HERE.md`, `README_FINAL.md`, `DESIGN*.md` など）は `docs/archive/` に退避済みで、現行実装とは一致しない（正は `README.md` / `DEPLOYMENT.md`）
